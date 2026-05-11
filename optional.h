@@ -3,6 +3,7 @@
 #include <new>
 #include <type_traits>
 #include <utility>
+#include <stdexcept>
 
 template <typename T>
 class Optional {
@@ -59,3 +60,181 @@ private:
     alignas(T) unsigned char storage_[sizeof(T)];
     bool has_value_ = false;
 };
+
+// ======================== IMPLEMENTATIONS ========================
+
+template <typename T>
+Optional<T>::Optional() : has_value_(false) {}
+
+template <typename T>
+Optional<T>::Optional(const T& value) : has_value_(true) {
+    new (storage_) T(value);
+}
+
+template <typename T>
+Optional<T>::Optional(T&& value) : has_value_(true) {
+    new (storage_) T(std::move(value));
+}
+
+template <typename T>
+Optional<T>::Optional(const Optional& other) : has_value_(other.has_value_) {
+    if (has_value_) {
+        new (storage_) T(*reinterpret_cast<const T*>(other.storage_));
+    }
+}
+
+template <typename T>
+Optional<T>::Optional(Optional&& other) : has_value_(other.has_value_) {
+    if (has_value_) {
+        new (storage_) T(std::move(*reinterpret_cast<T*>(other.storage_)));
+        other.reset();
+    }
+}
+
+template <typename T>
+Optional<T>& Optional<T>::operator=(const Optional& other) {
+    if (this != &other) {
+        reset();
+        has_value_ = other.has_value_;
+        if (has_value_) {
+            new (storage_) T(*reinterpret_cast<const T*>(other.storage_));
+        }
+    }
+    return *this;
+}
+
+template <typename T>
+Optional<T>& Optional<T>::operator=(Optional&& other) {
+    if (this != &other) {
+        reset();
+        has_value_ = other.has_value_;
+        if (has_value_) {
+            new (storage_) T(std::move(*reinterpret_cast<T*>(other.storage_)));
+            other.reset();
+        }
+    }
+    return *this;
+}
+
+template <typename T>
+Optional<T>& Optional<T>::operator=(const T& value) {
+    if (has_value_) {
+        **this = value;
+    } else {
+        new (storage_) T(value);
+        has_value_ = true;
+    }
+    return *this;
+}
+
+template <typename T>
+Optional<T>& Optional<T>::operator=(T&& value) {
+    if (has_value_) {
+        **this = std::move(value);
+    } else {
+        new (storage_) T(std::move(value));
+        has_value_ = true;
+    }
+    return *this;
+}
+
+template <typename T>
+Optional<T>::~Optional() {
+    reset();
+}
+
+template <typename T>
+bool Optional<T>::has_value() const {
+    return has_value_;
+}
+
+template <typename T>
+Optional<T>::operator bool() const {
+    return has_value_;
+}
+
+template <typename T>
+T& Optional<T>::value() {
+    if (!has_value_) {
+        throw std::bad_optional_access();
+    }
+    return *reinterpret_cast<T*>(storage_);
+}
+
+template <typename T>
+const T& Optional<T>::value() const {
+    if (!has_value_) {
+        throw std::bad_optional_access();
+    }
+    return *reinterpret_cast<const T*>(storage_);
+}
+
+template <typename T>
+T Optional<T>::value_or(const T& default_value) const {
+    return has_value_ ? **this : default_value;
+}
+
+template <typename T>
+T& Optional<T>::operator*() {
+    return *reinterpret_cast<T*>(storage_);
+}
+
+template <typename T>
+const T& Optional<T>::operator*() const {
+    return *reinterpret_cast<const T*>(storage_);
+}
+
+template <typename T>
+T* Optional<T>::operator->() {
+    return reinterpret_cast<T*>(storage_);
+}
+
+template <typename T>
+const T* Optional<T>::operator->() const {
+    return reinterpret_cast<const T*>(storage_);
+}
+
+template <typename T>
+template <typename... Args>
+T& Optional<T>::emplace(Args&&... args) {
+    reset();
+    new (storage_) T(std::forward<Args>(args)...);
+    has_value_ = true;
+    return **this;
+}
+
+template <typename T>
+void Optional<T>::reset() {
+    if (has_value_) {
+        reinterpret_cast<T*>(storage_)->~T();
+        has_value_ = false;
+    }
+}
+
+template <typename T>
+void Optional<T>::swap(Optional& other) {
+    using std::swap;
+    if (has_value_ && other.has_value_) {
+        swap(**this, *other);
+    } else if (has_value_) {
+        new (other.storage_) T(std::move(**this));
+        reset();
+        other.has_value_ = true;
+    } else if (other.has_value_) {
+        new (storage_) T(std::move(*other));
+        other.reset();
+        has_value_ = true;
+    }
+}
+
+template <typename T>
+bool Optional<T>::operator==(const Optional& rhs) const {
+    if (has_value_ != rhs.has_value_) return false;
+    if (!has_value_) return true;
+    return **this == *rhs;
+}
+
+template <typename T>
+bool Optional<T>::operator!=(const Optional& rhs) const {
+    return !(*this == rhs);
+}
